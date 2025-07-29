@@ -12,8 +12,8 @@
     .dependencies = .{
         .curl = .{
             // https://github.com/curl/curl/releases/tag/curl-8_8_0
-            .url = "https://github.com/curl/curl/releases/download/curl-8_8_0/curl-8.8.0.tar.gz",
-            .hash = "N-V-__8AAHipPQF9UuLPiaV1CtJzZIxvTN61tMGdFx8LGjIV",
+            .url = "https://github.com/curl/curl/releases/download/curl-8_15_0/curl-8.15.0.tar.gz",
+            .hash = "N-V-__8AAHGgPwH1XE5mB7bNofrDyBE5VWADWmBRlFQaVXWU",
             .lazy = true,
         },
         // https://github.com/madler/zlib/releases/tag/v1.3.1
@@ -23,8 +23,8 @@
             .lazy = true,
         },
         .mbedtls = .{
-            .url = "https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v3.6.0.tar.gz",
-            .hash = "N-V-__8AAFrtpQI1j9eOv7aN3lt3eH1TJfH4npAdRIrg2gGH",
+            .url = "https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v3.6.4.tar.gz",
+            .hash = "N-V-__8AADE9jALWhPS2ykOLbf8gUmr9r-SBwyzzpccbtBAv",
             .lazy = true,
         },
     },
