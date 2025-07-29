@@ -7,100 +7,78 @@ const Easy = curl.Easy;
 
 const LOCAL_SERVER_ADDR = "http://localhost:8182";
 
-fn get(allocator: Allocator, easy: Easy) !void {
-    try easy.setVerbose(true);
-    const resp = try easy.get("https://httpbin.org/anything");
-    defer resp.deinit();
+fn get(easy: Easy) !void {
+    {
+        println("GET without write context");
+        const resp = try easy.fetch("https://httpbin.org/anything", .{}, {});
 
-    const body = resp.body.?.items;
-    std.debug.print("Status code: {d}\nBody: {s}\n", .{
-        resp.status_code,
-        body,
-    });
+        std.debug.print("Status code: {d}\n", .{resp.status_code});
+    }
 
-    const Response = struct {
-        headers: struct {
-            Host: []const u8,
-        },
-        method: []const u8,
-    };
-    const parsed = try std.json.parseFromSlice(Response, allocator, body, .{
-        .ignore_unknown_fields = true,
-    });
-    defer parsed.deinit();
-
-    try std.testing.expectEqualDeep(parsed.value, Response{
-        .headers = .{ .Host = "httpbin.org" },
-        .method = "GET",
-    });
+    {
+        println("GET with fixed buffer");
+        var buffer: [1024]u8 = undefined;
+        var writeContext = curl.FixedWriteContext.init(&buffer);
+        const resp = try easy.fetch("https://httpbin.org/anything", .{}, &writeContext);
+        std.debug.print("Status code: {d}\nBody: {s}\n", .{
+            resp.status_code,
+            writeContext.asSlice(),
+        });
+    }
 }
 
 fn post(allocator: Allocator, easy: Easy) !void {
     const payload =
         \\{"name": "John", "age": 15}
     ;
-    try easy.setVerbose(false);
-    const resp = try easy.post("https://httpbin.org/anything", "application/json", payload);
-    defer resp.deinit();
+    var writeContext = curl.ResizableWriteContext.init(allocator);
+    defer writeContext.deinit();
+    const resp = try easy.fetch(
+        "https://httpbin.org/anything",
+        .{
+            .method = .POST,
+            .body = payload,
+            .headers = &.{
+                "Content-Type: application/json",
+            },
+        },
+        &writeContext,
+    );
 
     std.debug.print("Status code: {d}\nBody: {s}\n", .{
         resp.status_code,
-        resp.body.?.items,
-    });
-
-    const Response = struct {
-        headers: struct {
-            @"Content-Type": []const u8,
-        },
-        json: struct {
-            name: []const u8,
-            age: u32,
-        },
-        method: []const u8,
-    };
-    const parsed = try std.json.parseFromSlice(Response, allocator, resp.body.?.items, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-
-    try std.testing.expectEqualDeep(parsed.value, Response{
-        .headers = .{ .@"Content-Type" = "application/json" },
-        .json = .{ .name = "John", .age = 15 },
-        .method = "POST",
+        writeContext.asSlice(),
     });
 }
 
 fn upload(allocator: Allocator, easy: Easy) !void {
     const path = "LICENSE";
-    const resp = try easy.upload(LOCAL_SERVER_ADDR ++ "/anything", path);
-    const Response = struct {
-        method: []const u8,
-        body_len: usize,
-    };
-    const parsed = try std.json.parseFromSlice(Response, allocator, resp.body.?.items, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
+    var writeContext = curl.ResizableWriteContext.init(allocator);
+    defer writeContext.deinit();
 
-    try std.testing.expectEqualDeep(parsed.value, Response{
-        .body_len = 1086,
-        .method = "PUT",
-    });
+    const resp = try easy.upload(LOCAL_SERVER_ADDR ++ "/anything", path, &writeContext);
 
     std.debug.print("Status code: {d}\nBody: {s}\n", .{
         resp.status_code,
-        resp.body.?.items,
+        writeContext.asSlice(),
     });
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer if (gpa.deinit() != .ok) @panic("leak");
+    const allocator = gpa.allocator();
 
     const ca_bundle = try curl.allocCABundle(allocator);
     defer ca_bundle.deinit();
-    const easy = try Easy.init(allocator, .{
+    const easy = try Easy.init(.{
         .ca_bundle = ca_bundle,
     });
     defer easy.deinit();
 
+    try easy.setVerbose(false);
     println("GET demo");
-    try get(allocator, easy);
+    try get(easy);
 
     println("POST demo");
     easy.reset();

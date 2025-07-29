@@ -26,11 +26,11 @@ fn putWithCustomHeader(allocator: Allocator, easy: Easy) !void {
     ;
 
     const headers = blk: {
-        var h = try easy.createHeaders();
+        var h: Easy.Headers = .{};
         errdefer h.deinit();
-        try h.add("content-type", "application/json");
-        try h.add("user-agent", UA);
-        try h.add("Authorization", "Basic YWxhZGRpbjpvcGVuc2VzYW1l");
+        try h.add("content-type: application/json");
+        try h.add(std.fmt.comptimePrint("user-agent: {s}", .{UA}));
+        try h.add("Authorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l");
         break :blk h;
     };
     defer headers.deinit();
@@ -40,22 +40,23 @@ fn putWithCustomHeader(allocator: Allocator, easy: Easy) !void {
     try easy.setMethod(.PUT);
     try easy.setVerbose(true);
     try easy.setPostFields(body);
-    var buf = curl.Buffer.init(allocator);
-    try easy.setWritedata(&buf);
-    try easy.setWritefunction(curl.bufferWriteCallback);
 
-    var resp = try easy.perform();
-    resp.body = buf;
-    defer resp.deinit();
+    var writeContext = curl.ResizableWriteContext.init(allocator);
+    defer writeContext.deinit();
+    try easy.setWriteContext(&writeContext, curl.ResizableWriteContext.write);
 
+    const resp = try easy.perform();
     std.debug.print("Status code: {d}\nBody: {s}\n", .{
         resp.status_code,
-        resp.body.?.items,
+        writeContext.asSlice(),
     });
 
-    const parsed = try std.json.parseFromSlice(Response, allocator, resp.body.?.items, .{
-        .ignore_unknown_fields = true,
-    });
+    const parsed = try std.json.parseFromSlice(
+        Response,
+        allocator,
+        writeContext.asSlice(),
+        .{ .ignore_unknown_fields = true },
+    );
     defer parsed.deinit();
 
     try std.testing.expectEqualDeep(
@@ -86,7 +87,7 @@ fn putWithCustomHeader(allocator: Allocator, easy: Easy) !void {
     }
 }
 
-fn postMutliPart(easy: Easy) !void {
+fn postMultiPart(allocator: Allocator, easy: Easy) !void {
     // Reset old options, e.g. headers.
     easy.reset();
 
@@ -101,30 +102,26 @@ fn postMutliPart(easy: Easy) !void {
     try easy.setMethod(.PUT);
     try easy.setMultiPart(multi_part);
     try easy.setVerbose(true);
-    var buf = curl.Buffer.init(easy.allocator);
-    try easy.setWritedata(&buf);
-    try easy.setWritefunction(curl.bufferWriteCallback);
 
-    var resp = try easy.perform();
-    resp.body = buf;
-    defer resp.deinit();
+    var writeContext = curl.ResizableWriteContext.init(allocator);
+    defer writeContext.deinit();
+    try easy.setWriteContext(&writeContext, curl.ResizableWriteContext.write);
 
-    std.debug.print("resp:{s}\n", .{resp.body.?.items});
+    const resp = try easy.perform();
+    std.debug.print("code: {d}, resp:{s}\n", .{ resp.status_code, writeContext.asSlice() });
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer if (gpa.deinit() != .ok) @panic("leak");
+    const allocator = gpa.allocator();
 
     const ca_bundle = try curl.allocCABundle(allocator);
     defer ca_bundle.deinit();
-    const easy = try Easy.init(allocator, .{
-        .ca_bundle = ca_bundle,
-    });
+    const easy = try Easy.init(.{ .ca_bundle = ca_bundle });
     defer easy.deinit();
-
-    curl.printLibcurlVersion();
 
     println("PUT with custom header demo");
     try putWithCustomHeader(allocator, easy);
-    try postMutliPart(easy);
+    try postMultiPart(allocator, easy);
 }

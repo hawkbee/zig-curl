@@ -4,7 +4,73 @@ pub const c = @cImport({
 });
 const Allocator = std.mem.Allocator;
 const Encoder = std.base64.standard.Encoder;
-pub const Buffer = std.ArrayList(u8);
+pub const ResizableBuffer = std.ArrayList(u8);
+pub const FixedBuffer = struct {
+    data: []u8,
+    // How many bytes are used in the buffer.
+    size: usize,
+
+    pub fn init(data: []u8) FixedBuffer {
+        return .{ .data = data, .size = 0 };
+    }
+
+    pub fn asSlice(self: *FixedBuffer) []const u8 {
+        return self.data[0..self.size];
+    }
+};
+
+pub const FixedWriteContext = struct {
+    buffer: FixedBuffer,
+
+    pub fn init(buffer: []u8) FixedWriteContext {
+        return .{ .buffer = .init(buffer) };
+    }
+
+    pub fn write(
+        ctx: *FixedWriteContext,
+        data: []const u8,
+    ) usize {
+        if (ctx.buffer.size + data.len > ctx.buffer.data.len) {
+            // Not enough space in the buffer
+            return 0;
+        }
+        std.mem.copyForwards(u8, ctx.buffer.data[ctx.buffer.size..], data);
+        ctx.buffer.size += data.len;
+        return data.len;
+    }
+
+    pub fn asSlice(self: *FixedWriteContext) []const u8 {
+        return self.buffer.asSlice();
+    }
+};
+
+pub const ResizableWriteContext = struct {
+    buffer: ResizableBuffer,
+
+    pub fn init(allocator: Allocator) ResizableWriteContext {
+        return .{ .buffer = ResizableBuffer.init(allocator) };
+    }
+
+    pub fn deinit(self: *ResizableWriteContext) void {
+        self.buffer.deinit();
+    }
+
+    pub fn write(
+        ctx: *ResizableWriteContext,
+        data: []const u8,
+    ) usize {
+        ctx.buffer.appendSlice(data) catch {
+            // Out of memory
+            return 0;
+        };
+
+        return data.len;
+    }
+
+    pub fn asSlice(self: *ResizableWriteContext) []const u8 {
+        return self.buffer.items;
+    }
+};
 
 pub fn encode_base64(allocator: Allocator, input: []const u8) ![]const u8 {
     const encoded_len = Encoder.calcSize(input.len);
@@ -53,16 +119,17 @@ pub fn printLibcurlVersion() void {
     }
 }
 
-pub fn has_parse_header_support() bool {
+pub fn hasParseHeaderSupport() bool {
     // `curl_header` is officially supported since 7.84.0.
-    // https://curl.se/libcurl/c/curl_easy_header.html
+    // https://everything.curl.dev/helpers/headerapi/index.html
     return c.CURL_AT_LEAST_VERSION(7, 84, 0);
 }
 
 comptime {
-    // `curl_easy_reset` is only available since 7.12.0
-    if (!c.CURL_AT_LEAST_VERSION(7, 12, 0)) {
-        @compileError("Libcurl version must at least 7.12.0");
+    // `CURL_AT_LEAST_VERSION` is only available since 7.43.0
+    // https://curl.se/libcurl/c/symbols-in-versions.html
+    if (!@hasDecl(c, "CURL_AT_LEAST_VERSION")) {
+        @compileError("Libcurl version must at least 7.43.0");
     }
 }
 
@@ -92,11 +159,11 @@ test "url encode" {
 const CERT_MARKER_BEGIN = "-----BEGIN CERTIFICATE-----";
 const CERT_MARKER_END = "\n-----END CERTIFICATE-----\n";
 
-pub fn allocCABundle(allocator: std.mem.Allocator) !Buffer {
+pub fn allocCABundle(allocator: std.mem.Allocator) !ResizableBuffer {
     var bundle: std.crypto.Certificate.Bundle = .{};
     defer bundle.deinit(allocator);
 
-    var blob = Buffer.init(allocator);
+    var blob = ResizableBuffer.init(allocator);
     try bundle.rescan(allocator);
     var iter = bundle.map.iterator();
     while (iter.next()) |entry| {

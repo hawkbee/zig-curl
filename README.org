@@ -1,10 +1,10 @@
 #+TITLE: zig-curl
 #+DATE: 2023-09-16T23:16:15+0800
-#+LASTMOD: 2024-05-12T13:20:36+0800
+#+LASTMOD: 2025-07-27T20:02:08+0800
 #+OPTIONS: toc:nil num:nil
 #+STARTUP: content
 
-[[https://img.shields.io/badge/zig%20version-0.12.0-blue.svg]]
+[[https://img.shields.io/badge/zig%20version-0.14.0-blue.svg]]
 [[https://img.shields.io/badge/zig%20version-master-blue.svg]]
 [[https://github.com/jiacai2050/zig-curl/actions/workflows/CI.yml][https://github.com/jiacai2050/zig-curl/actions/workflows/CI.yml/badge.svg]]
 [[https://ci.codeberg.org/repos/13257][https://ci.codeberg.org/api/badges/13257/status.svg]]
@@ -23,7 +23,13 @@ The vendored libraries consist of:
 | mbedtls | [[https://github.com/Mbed-TLS/mbedtls/tree/v3.6.0][3.6.0]]   |
 
 * Usage
+#+begin_src bash :results verbatim :exports results :wrap src zig
+cat examples/hello.zig
+#+end_src
+
+#+RESULTS:
 #+begin_src zig
+const std = @import("std");
 const curl = @import("curl");
 
 pub fn main() !void {
@@ -31,26 +37,35 @@ pub fn main() !void {
     defer if (gpa.deinit() != .ok) @panic("leak");
     const allocator = gpa.allocator();
 
-    const easy = try curl.Easy.init(allocator, .{});
+    const ca_bundle = try curl.allocCABundle(allocator);
+    defer ca_bundle.deinit();
+    const easy = try curl.Easy.init(.{
+        .ca_bundle = ca_bundle,
+    });
     defer easy.deinit();
 
-    const resp = try easy.get("http://httpbin.org/anything");
-    defer resp.deinit();
+    var ctx = curl.ResizableWriteContext.init(allocator);
+    defer ctx.deinit();
+    const resp = try easy.fetch("https://httpbin.org/anything", .{}, &ctx);
 
     std.debug.print("Status code: {d}\nBody: {s}\n", .{
         resp.status_code,
-        resp.body.items,
+        ctx.asSlice(),
     });
 }
 #+end_src
+
+
 See [[file:examples/basic.zig]], [[file:examples/advanced.zig]] for more usage.
 
 * Installation
 #+begin_src bash
-zig fetch --save=curl https://github.com/jiacai2050/zig-curl/archive/${COMMIT}.tar.gz
+zig fetch --save=curl  https://github.com/jiacai2050/zig-curl/archive/refs/tags/${TAG}.zip
 #+end_src
 
-Replace ~${COMMIT}~ with a real one, then in your =build.zig=, import the module like this:
+The latest tag can be found on [[https://github.com/jiacai2050/zig-curl/releases/][release page]].
+
+After fetch, import =curl= like this in your =build.zig=:
 #+begin_src zig
 const dep_curl = b.dependency("curl", .{});
 exe.root_module.addImport("curl", dep_curl.module("curl"));
@@ -63,10 +78,6 @@ const dep_curl = b.dependency("curl", .{ .link_vendor = false });
 exe.linkSystemLibrary("curl");
 exe.linkLibC();
 #+end_src
-
-* Roadmap
-
-- [x] Currently only easy API is supported, support [[https://curl.se/libcurl/c/libcurl-multi.html][multi API]].
 
 * License
 [[file:LICENSE][MIT]]
